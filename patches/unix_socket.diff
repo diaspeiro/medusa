@@ -1,0 +1,195 @@
+diff --git a/medusa/__main__.py b/medusa/__main__.py
+index 009da87fa..9f355c40f 100755
+--- a/medusa/__main__.py
++++ b/medusa/__main__.py
+@@ -32,6 +32,9 @@ Options:
+        --pidfile=[FILE]  Combined with --daemon creates a pid file
+ 
+   -p,  --port=[PORT]     Override default/configured port to listen on
++       --unix-socket=[PATH]
++                         Listen on a Unix domain socket at PATH instead of a
++                         TCP port. When set, --port is ignored.
+        --datadir=[PATH]  Override folder (full path) as location for
+                          storing database, config file, cache, and log files
+                          Default Medusa directory
+@@ -123,6 +126,7 @@ class Application(object):
+         # web server constants
+         self.web_server = None
+         self.forced_port = None
++        self.forced_unix_socket = None
+         self.no_launch = False
+ 
+         self.web_host = '0.0.0.0'
+@@ -223,7 +227,8 @@ class Application(object):
+         try:
+             opts, _ = getopt.getopt(
+                 args, 'hqdp::',
+-                ['help', 'quiet', 'nolaunch', 'daemon', 'pidfile=', 'port=', 'datadir=', 'config=', 'noresize']
++                ['help', 'quiet', 'nolaunch', 'daemon', 'pidfile=', 'port=', 'unix-socket=',
++                 'datadir=', 'config=', 'noresize']
+             )
+         except getopt.GetoptError:
+             sys.exit(self.help_message())
+@@ -250,6 +255,10 @@ class Application(object):
+                 except ValueError:
+                     sys.exit('Port: %s is not a number. Exiting.' % value)
+ 
++            # Listen on a unix socket instead of a TCP port
++            if option in ('--unix-socket',):
++                self.forced_unix_socket = os.path.abspath(value)
++
+             # Run as a double forked daemon
+             if option in ('-d', '--daemon'):
+                 self.run_as_daemon = True
+@@ -393,10 +402,17 @@ class Application(object):
+         else:
+             self.web_host = '' if app.WEB_IPV6 else '0.0.0.0'
+ 
++        unix_socket = self.forced_unix_socket or app.WEB_UNIX_SOCKET
++
++        # When listening on a unix socket, browser auto-launch can't reach it.
++        if unix_socket:
++            self.no_launch = True
++
+         # web server options
+         self.web_options = {
+             'port': int(self.start_port),
+             'host': self.web_host,
++            'unix_socket': unix_socket,
+             'data_root': app.DATA_ROOT,
+             'vue_root': os.path.join(app.PROG_DIR, 'vue'),
+             'web_root': app.WEB_ROOT,
+@@ -570,6 +586,12 @@ class Application(object):
+ 
+             app.WEB_HOST = check_setting_str(app.CFG, 'General', 'web_host', '0.0.0.0')
+             app.WEB_IPV6 = bool(check_setting_int(app.CFG, 'General', 'web_ipv6', 0))
++            app.WEB_UNIX_SOCKET = check_setting_str(app.CFG, 'General', 'web_unix_socket', '')
++
++            # Allow overriding the unix socket path via environment variable
++            env_unix_socket = os.environ.get('MEDUSA_WEB_UNIX_SOCKET')
++            if env_unix_socket:
++                app.WEB_UNIX_SOCKET = env_unix_socket
+             app.WEB_ROOT = check_setting_str(app.CFG, 'General', 'web_root', '').rstrip('/')
+             app.WEB_LOG = bool(check_setting_int(app.CFG, 'General', 'web_log', 0))
+             app.WEB_USERNAME = check_setting_str(app.CFG, 'General', 'web_username', '', censor_log='normal')
+@@ -1612,6 +1634,7 @@ class Application(object):
+         new_config['General']['web_port'] = app.WEB_PORT
+         new_config['General']['web_host'] = app.WEB_HOST
+         new_config['General']['web_ipv6'] = int(app.WEB_IPV6)
++        new_config['General']['web_unix_socket'] = app.WEB_UNIX_SOCKET
+         new_config['General']['web_log'] = int(app.WEB_LOG)
+         new_config['General']['web_root'] = app.WEB_ROOT
+         new_config['General']['web_username'] = app.WEB_USERNAME
+diff --git a/medusa/app.py b/medusa/app.py
+index fef502ba8..2a7864a8c 100644
+--- a/medusa/app.py
++++ b/medusa/app.py
+@@ -178,6 +178,7 @@ class MedusaApp(object):
+         self.WEB_PASSWORD = None
+         self.WEB_HOST = None
+         self.WEB_IPV6 = None
++        self.WEB_UNIX_SOCKET = None
+         self.WEB_COOKIE_SECRET = None
+         self.WEB_USE_GZIP = True
+ 
+diff --git a/medusa/server/core.py b/medusa/server/core.py
+index 25229b968..c13c94ed5 100644
+--- a/medusa/server/core.py
++++ b/medusa/server/core.py
+@@ -4,6 +4,7 @@ from __future__ import unicode_literals
+ 
+ import logging
+ import os
++import socket
+ import threading
+ from posixpath import join
+ 
+@@ -57,6 +58,7 @@ import six
+ 
+ from tornado.httpserver import HTTPServer
+ from tornado.ioloop import IOLoop
++from tornado.netutil import bind_unix_socket
+ from tornado.web import (
+     Application,
+     RedirectHandler,
+@@ -178,6 +180,7 @@ class AppWebServer(threading.Thread):
+         self.options = options or {}
+         self.options.setdefault('port', 8081)
+         self.options.setdefault('host', '0.0.0.0')
++        self.options.setdefault('unix_socket', None)
+         self.options.setdefault('log_dir', None)
+         self.options.setdefault('username', '')
+         self.options.setdefault('password', '')
+@@ -345,21 +348,48 @@ class AppWebServer(threading.Thread):
+             protocol = 'http'
+             self.server = HTTPServer(self.app)
+ 
+-        log.info('Starting Medusa on {scheme}://{host}:{port}{web_root}/', {
+-            'scheme': protocol, 'host': self.options['host'],
+-            'port': self.options['port'], 'web_root': self.options['theme_path']
+-        })
++        unix_socket = self.options.get('unix_socket')
++        if unix_socket:
++            log.info('Starting Medusa on unix://{path}{web_root}/', {
++                'path': unix_socket, 'web_root': self.options['theme_path']
++            })
++        else:
++            log.info('Starting Medusa on {scheme}://{host}:{port}{web_root}/', {
++                'scheme': protocol, 'host': self.options['host'],
++                'port': self.options['port'], 'web_root': self.options['theme_path']
++            })
+ 
+         try:
+-            self.server.listen(self.options['port'], self.options['host'])
++            if unix_socket:
++                if os.path.exists(unix_socket):
++                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
++                        probe.settimeout(1)
++                        try:
++                            probe.connect(unix_socket)
++                        except OSError:
++                            log.error('Removing stale unix socket.')
++                        else:
++                            log.error('Could listen on unix socket, path exists: {path}', {'path': unix_socket})
++                            os._exit(1)  # pylint: disable=protected-access
++                    os.unlink(unix_socket)                    
++                sock = bind_unix_socket(unix_socket, mode=0o660)
++                self.server.add_sockets([sock])
++            else:
++                self.server.listen(self.options['port'], self.options['host'])
+         except Exception as ex:
+-            if app.LAUNCH_BROWSER and not self.daemon:
++            if not unix_socket and app.LAUNCH_BROWSER and not self.daemon:
+                 app.instance.launch_browser('https' if app.ENABLE_HTTPS else 'http', self.options['port'], app.WEB_ROOT)
+                 log.info('Launching browser and exiting')
+-            log.info('Could not start the web server on port {port}. Exception: {ex}', {
+-                'port': self.options['port'],
+-                'ex': ex
+-            })
++            if unix_socket:
++                log.info('Could not start the web server on unix socket {path}. Exception: {ex}', {
++                    'path': unix_socket,
++                    'ex': ex
++                })
++            else:
++                log.info('Could not start the web server on port {port}. Exception: {ex}', {
++                    'port': self.options['port'],
++                    'ex': ex
++                })
+             os._exit(1)  # pylint: disable=protected-access
+ 
+         try:
+@@ -372,6 +402,13 @@ class AppWebServer(threading.Thread):
+     def shutDown(self):
+         self.alive = False
+         self.io_loop.stop()
++        unix_socket = self.options.get('unix_socket')
++        if unix_socket and os.path.exists(unix_socket):
++            try:
++                os.unlink(unix_socket)
++            except OSError as ex:
++                log.warning('Failed to remove unix socket {path}: {ex}',
++                            {'path': unix_socket, 'ex': ex})
+ 
+     def log_request(self, handler):
+         """

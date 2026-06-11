@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    {
+      "name": "medusa",
+      "repo": "pymedusa/Medusa",
+      "pattern": "^v\\d+\\.\\d+(\\.\\d+)?$",
+      "stripPattern": "^v"
+    }
+  ]
+}
