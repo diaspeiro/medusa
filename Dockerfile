@@ -6,19 +6,19 @@ ARG BASE_IMAGE=cgr.dev/chainguard/wolfi-base:latest
 FROM ${BASE_IMAGE} AS build_medusa
 LABEL stage=build
 
-ARG MEDUSA_VERSION
-
 WORKDIR /build
 
-RUN --mount=type=cache,target=/var/cache/apk,sharing=locked apk upgrade && apk add bash git patch
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked apk upgrade && apk add bash ca-certificates curl jq patch tar
 
 SHELL ["/bin/bash", "-c"]
 
-RUN --mount=type=bind,source=patches,target=/mnt/patches <<ENDRUN
+# Fetch the pinned source archive (verified by sha256), extract, and patch.
+RUN --mount=type=bind,source=patches,target=/mnt/patches \
+    --mount=type=bind,source=.github/dependency-versions.json,target=/build/dv.json \
+    --mount=type=bind,source=scripts/fetch-dep.sh,target=/usr/local/bin/fetch-dep <<ENDRUN
 set -uex
 umask 0022
-clone_repo_version() { git -c advice.detachedHead=false clone --depth 1 --branch "$2" "https://github.com/$1" "${@:3}"; }
-clone_repo_version "pymedusa/Medusa" "v${MEDUSA_VERSION}" medusa
+fetch-dep medusa
 cd medusa
 patch -p1 < /mnt/patches/unix_socket.diff
 ENDRUN
