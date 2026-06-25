@@ -8,7 +8,7 @@ LABEL stage=build
 
 WORKDIR /build
 
-RUN --mount=type=cache,target=/var/cache/apk,sharing=locked apk upgrade && apk add bash ca-certificates curl jq patch tar
+RUN --mount=type=cache,target=/var/cache,sharing=locked apk upgrade && apk add bash ca-certificates curl jq patch tar
 
 SHELL ["/bin/bash", "-c"]
 
@@ -29,7 +29,7 @@ ENDRUN
 FROM ${BASE_IMAGE} AS medusa
 ARG SOURCE_DATE_EPOCH=0
 
-RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+RUN --mount=type=cache,target=/var/cache,sharing=locked \
     --mount=type=bind,from=build_medusa,source=/build/medusa,target=/mnt/medusa \
     --mount=type=bind,source=files,target=/mnt/files <<ENDRUN
 set -uex
@@ -40,7 +40,6 @@ cp -a /mnt/medusa/. /opt/medusa
 cp -a /mnt/files/. /
 find /docker-entrypoint.d -type f -regex '.*\.\(sh\|envsh\)$' -print0 | xargs -r0 chmod +x
 chmod +x /docker-entrypoint.sh
-rm -rf /var/cache/apk/* /var/cache/ldconfig /var/cache/misc
 mkdir -p /ipc/medusa /config /media /downloads
 chmod 755 /ipc
 chmod 700 /ipc/medusa /config /media /downloads
