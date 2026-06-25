@@ -1,6 +1,4 @@
 #!/bin/sh
-# adapted from the official nginx docker container
-
 set -eu
 
 if [ "$(basename "${1:-}")" = "python3" ]; then
@@ -8,7 +6,7 @@ while read -r f; do
     case "$f" in
         *.envsh) [ -x "$f" ] && . "$f" ;;
         *.sh)    [ -x "$f" ] && "$f" ;;
-esac
+    esac
 done << EOF
 $(find "/docker-entrypoint.d/" -follow -type f | sort -V)
 EOF
