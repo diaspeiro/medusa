@@ -8,7 +8,7 @@ LABEL stage=build
 
 WORKDIR /build
 
-RUN --mount=type=cache,target=/var/cache,sharing=locked apk upgrade && apk add bash ca-certificates curl jq patch tar
+RUN --mount=type=cache,target=/var/cache,sharing=locked apk upgrade && apk add bash ca-certificates curl jq patch
 
 SHELL ["/bin/bash", "-c"]
 
