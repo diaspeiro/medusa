@@ -1,7 +1,7 @@
 {
   "medusa": {
-    "version": "1.0.25",
-    "url": "https://github.com/pymedusa/Medusa/archive/27e13769e83197d8e4ba7145f964384058592d4a.tar.gz",
-    "sha256": "5a388bbe494822e485fb781705fb36018b17a96af223c14e2c95adc1e255b6f7"
+    "version": "1.0.26",
+    "url": "https://github.com/pymedusa/Medusa/archive/bbb1c9271692170c00eed3d5c573425bf6c91050.tar.gz",
+    "sha256": "5b868ac9559ca3165cc7c558f7ddafa44c71c5b5ac2db21102bfdbe006409e1b"
   }
 }
