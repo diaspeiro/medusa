@@ -19,8 +19,6 @@ RUN --mount=type=bind,source=patches,target=/mnt/patches \
 set -uex
 umask 0022
 fetch-dep medusa
-cd medusa
-patch -p1 < /mnt/patches/unix_socket.diff
 ENDRUN
 
 #===============#
